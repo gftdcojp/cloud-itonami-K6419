@@ -218,8 +218,9 @@ core-banking/clearing-network integration would swap in
 | `src/banking/governor.cljc` | **Monetary Intermediation Governor** -- 4 HARD checks (spec-basis · evidence-incomplete · iban-checksum-invalid, pure ground-truth checksum recompute · sanctions-flag-unresolved, unconditional evaluation, REUSING the exact `sanctions-violations` concept `underwriting`/`casualty`/`vcfund`/`formation`/`realty` already established -- sanctions screening is a genuinely shared, industry-standard AML concern across financial-services verticals) + already-settled/already-dispatched guards + 1 soft (confidence/actuation gate) |
 | `src/banking/phase.cljc` | **Phase 0→3** -- read-only → assisted intake → assisted verify → supervised (both settlement posting and interbank-message dispatch always human; account intake is the ONLY auto-eligible op, no direct capital risk) |
 | `src/banking/operation.cljc` | **OperationActor** -- langgraph-clj StateGraph |
+| `src/banking/corporate_intel.cljc` | optional cross-reference into [`cloud-itonami-isic-8291`](https://github.com/cloud-itonami/cloud-itonami-isic-8291)'s `:disclosure/screen-name` -- catches an account holder clean on every LOCAL field but flagged in 8291's own sourced PEP/sanctions data; wired into `screen-sanctions` via an injected fn, default is a no-op so every prior caller's behavior is unchanged unless explicitly opted in. Since this actor's own vocabulary has no `:incomplete` middle ground, any non-clean 8291 signal (a hit, 8291's own pending human review, or 8291's screen being held) collapses onto the same `:unresolved` verdict a local flag would produce -- HARD-holding immediately, more conservative than the analogous `cloud-itonami-isic-6910` integration |
 | `src/banking/sim.cljc` | demo driver |
-| `test/banking/*_test.clj` | governor contract · phase invariants · store parity · registry conformance · facts coverage |
+| `test/banking/*_test.clj` | governor contract · phase invariants · store parity · registry conformance · facts coverage · corporate-intelligence integration |
 
 ## Business-process coverage (honest)
 

@@ -77,11 +77,34 @@
        :stake      nil
        :confidence 0.9})))
 
+(def default-corporate-intel-screen
+  "No-op corporate-intelligence cross-reference: always 'nothing on
+  file'. This is the default so every existing caller of
+  `screen-sanctions`/`infer`/`mock-advisor` keeps its exact prior
+  behavior unless it explicitly wires in
+  `banking.corporate-intel/screen` (or an equivalent). Not required
+  from this namespace directly -- keeping the dependency optional at
+  the bankingadvisor level, injected only by whoever builds the
+  advisor."
+  (constantly {:found? false :hit? false}))
+
 (defn- screen-sanctions
   "Sanctions-screening draft. `:sanctions-flag-unresolved?` on the
   account record injects the failure mode: the Monetary Intermediation
-  Governor must HOLD, un-overridably, on any unresolved flag."
-  [db {:keys [subject]}]
+  Governor must HOLD, un-overridably, on any unresolved flag.
+
+  `screen-fn` (holder name -> corporate-intel result, see
+  `banking.corporate-intel/screen`) is consulted ONLY once the local
+  flag is otherwise clean -- it can turn a would-be :resolved into
+  :unresolved, but a local unresolved flag is decided first, cheaply,
+  without depending on an external actor at all. Unlike a KYC-style
+  screen with an identification-document concept, this account-level
+  screen has only two verdicts (:unresolved / :resolved) -- there is
+  no middle 'incomplete' state here, so ANY non-clean signal from
+  8291 (a definitive hit, 8291's own pending human review, or 8291's
+  screen being held/rejected) lands on the SAME :unresolved verdict a
+  local flag would produce -- never silently :resolved."
+  [db {:keys [subject]} screen-fn]
   (let [a (store/account db subject)]
     (cond
       (nil? a)
@@ -99,13 +122,43 @@
        :confidence 0.95}
 
       :else
-      {:summary    (str (:holder-name a) ": 未解決の制裁リストフラグなし")
-       :rationale  "制裁リストスクリーニング完了。"
-       :cites      [:sanctions-check]
-       :effect     :sanctions-screen/set
-       :value      {:account-id subject :verdict :resolved}
-       :stake      nil
-       :confidence 0.9})))
+      (let [ci (screen-fn (:holder-name a))]
+        (cond
+          (:hit? ci)
+          {:summary    (str (:holder-name a) ": corporate-intelligence 照会で制裁/PEPフラグを検出")
+           :rationale  "cloud-itonami-isic-8291 の名前スクリーニングが一致を検出。人手確認とホールドが必須。"
+           :cites      [:corporate-intelligence]
+           :effect     :sanctions-screen/set
+           :value      {:account-id subject :verdict :unresolved}
+           :stake      nil
+           :confidence 0.9}
+
+          (:pending-human-review? ci)
+          {:summary    (str (:holder-name a) ": corporate-intelligence 照会が人手レビュー待ち")
+           :rationale  "cloud-itonami-isic-8291 側の DisclosureGovernor が high-stakes escalate 中。確定するまで未解決として扱う(この口座の語彙に中間状態は無い)。"
+           :cites      [:corporate-intelligence]
+           :effect     :sanctions-screen/set
+           :value      {:account-id subject :verdict :unresolved}
+           :stake      nil
+           :confidence 0.5}
+
+          (:held? ci)
+          {:summary    (str (:holder-name a) ": corporate-intelligence 照会が拒否された(契約/設定の問題)")
+           :rationale  (str "cloud-itonami-isic-8291 の DisclosureGovernor が本テナントの照会を拒否: " (pr-str (:reason ci)))
+           :cites      [:corporate-intelligence]
+           :effect     :sanctions-screen/set
+           :value      {:account-id subject :verdict :unresolved}
+           :stake      nil
+           :confidence 0.4}
+
+          :else
+          {:summary    (str (:holder-name a) ": 未解決の制裁リストフラグなし")
+           :rationale  "制裁リストスクリーニング完了 + corporate-intelligence 照会クリア(または未収載)。"
+           :cites      [:sanctions-check :corporate-intelligence]
+           :effect     :sanctions-screen/set
+           :value      {:account-id subject :verdict :resolved}
+           :stake      nil
+           :confidence 0.9})))))
 
 (defn- propose-settlement
   "Draft the actual SETTLEMENT action -- posting a real balanced ledger
@@ -151,16 +204,20 @@
 
 (defn infer
   "Route a request to the right proposal generator.
-  request: {:op kw :subject id ...op-specific...}"
-  [db {:keys [op] :as request}]
-  (case op
-    :account/intake                          (normalize-intake db request)
-    :compliance/verify                       (verify-compliance db request)
-    :sanctions/screen                        (screen-sanctions db request)
-    :actuation/post-settlement                (propose-settlement db request)
-    :actuation/dispatch-interbank-message      (propose-interbank-message db request)
-    {:summary "未対応の操作" :rationale (str op) :cites []
-     :effect :noop :stake nil :confidence 0.0}))
+  request: {:op kw :subject id ...op-specific...}
+  `screen-fn` (default: `default-corporate-intel-screen`, a no-op) is
+  only consulted by `:sanctions/screen`, once the local flag is
+  otherwise clean."
+  ([db request] (infer db request default-corporate-intel-screen))
+  ([db {:keys [op] :as request} screen-fn]
+   (case op
+     :account/intake                          (normalize-intake db request)
+     :compliance/verify                       (verify-compliance db request)
+     :sanctions/screen                        (screen-sanctions db request screen-fn)
+     :actuation/post-settlement                (propose-settlement db request)
+     :actuation/dispatch-interbank-message      (propose-interbank-message db request)
+     {:summary "未対応の操作" :rationale (str op) :cites []
+      :effect :noop :stake nil :confidence 0.0})))
 
 ;; ----------------------------- Advisor protocol -----------------------------
 
@@ -168,8 +225,16 @@
   (-advise [advisor store request] "store + request -> proposal map"))
 
 (defn mock-advisor
-  "The deterministic advisor (the `infer` logic above). Default everywhere."
-  [] (reify Advisor (-advise [_ st req] (infer st req))))
+  "The deterministic advisor (the `infer` logic above). Default everywhere.
+  opts:
+    :corporate-intel-screen -- holder name -> corporate-intel result (see
+      `banking.corporate-intel/screen`). Default: no-op (never changes a
+      screen-sanctions verdict), so `(mock-advisor)` with no args keeps
+      every existing caller's exact prior behavior."
+  ([] (mock-advisor {}))
+  ([{:keys [corporate-intel-screen]
+     :or   {corporate-intel-screen default-corporate-intel-screen}}]
+   (reify Advisor (-advise [_ st req] (infer st req corporate-intel-screen)))))
 
 (def ^:private system-prompt
   (str "あなたは地域金融仲介事業の決済記帳・為替メッセージ発信エージェントの助言者です。"

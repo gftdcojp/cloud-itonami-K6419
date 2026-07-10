@@ -82,7 +82,20 @@
                 :iban "DE89370400440532013000"
                 :sanctions-flag-unresolved? true
                 :settlement-posted? false :interbank-message-dispatched? false
-                :jurisdiction "JPN" :status :intake}}})
+                :jurisdiction "JPN" :status :intake}
+    ;; account-5: clean on every LOCAL field (no `:sanctions-flag-
+    ;; unresolved?`) but shares its `:holder-name` with
+    ;; cloud-itonami-isic-8291's own demo sanctions-flagged official
+    ;; ("Jane Smith (demo)", `of-2`/`co-200` in `dossier.store/demo-
+    ;; data`). Exists purely to prove `banking.corporate-intel`'s
+    ;; cross-reference into 8291 catches a holder this repo's local-
+    ;; only sanctions check alone would silently clear -- see
+    ;; `test/banking/corporate_intel_test.clj`.
+    "account-5" {:id "account-5" :holder-name "Jane Smith (demo)"
+                :iban "DE89370400440532013000"
+                :sanctions-flag-unresolved? false
+                :settlement-posted? false :interbank-message-dispatched? false
+                :jurisdiction "GBR" :status :intake}}})
 
 ;; ----------------------------- shared commit logic -----------------------------
 

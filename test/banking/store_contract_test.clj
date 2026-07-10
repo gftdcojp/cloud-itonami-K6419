@@ -22,7 +22,7 @@
       (is (true? (:sanctions-flag-unresolved? (store/account s "account-4"))))
       (is (false? (:settlement-posted? (store/account s "account-1"))))
       (is (false? (:interbank-message-dispatched? (store/account s "account-1"))))
-      (is (= ["account-1" "account-2" "account-3" "account-4"]
+      (is (= ["account-1" "account-2" "account-3" "account-4" "account-5"]
              (mapv :id (store/all-accounts s))))
       (is (nil? (store/sanctions-screen-of s "account-1")))
       (is (nil? (store/compliance-of s "account-1")))
