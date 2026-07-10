@@ -6,7 +6,7 @@
  :itonami.blueprint/social-impact [:financial-inclusion :data-sovereignty :transparency]
  :itonami.blueprint/governor :monetary-intermediation-governor
  :itonami.blueprint/required-technologies [:robotics :banking :swift :identity :forms :dmn :bpmn :audit-ledger]
- :itonami.blueprint/optional-technologies [:optimization]
+ :itonami.blueprint/optional-technologies [:optimization :corporate-intelligence]
  :itonami.blueprint/status :public-oss
  :itonami.blueprint/robotics true
  :itonami.blueprint/maturity :implemented}
