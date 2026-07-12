@@ -45,9 +45,9 @@
     (is (= (get-in result ["record" "immutable"]) true))))
 
 (deftest settlement-validation-rules
-  (is (thrown? Exception (r/register-settlement "" "JPN" 0)))
-  (is (thrown? Exception (r/register-settlement "account-1" "" 0)))
-  (is (thrown? Exception (r/register-settlement "account-1" "JPN" -1))))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (r/register-settlement "" "JPN" 0)))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (r/register-settlement "account-1" "" 0)))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (r/register-settlement "account-1" "JPN" -1))))
 
 ;; ----------------------------- register-interbank-message -----------------------------
 
@@ -65,9 +65,9 @@
     (is (= (get-in result ["record" "immutable"]) true))))
 
 (deftest message-validation-rules
-  (is (thrown? Exception (r/register-interbank-message "" "JPN" 0)))
-  (is (thrown? Exception (r/register-interbank-message "account-1" "" 0)))
-  (is (thrown? Exception (r/register-interbank-message "account-1" "JPN" -1))))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (r/register-interbank-message "" "JPN" 0)))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (r/register-interbank-message "account-1" "" 0)))
+  (is (thrown? #?(:clj Exception :cljs js/Error) (r/register-interbank-message "account-1" "JPN" -1))))
 
 (deftest history-is-append-only
   (let [c1 (r/register-settlement "account-1" "JPN" 0)
