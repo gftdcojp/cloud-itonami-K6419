@@ -107,10 +107,16 @@
   informed by `cloud-itonami-isic-6492`'s status-lifecycle bug
   (ADR-2607071320)."
   (:require [banking.facts :as facts]
+            [banking.kernels.gate :as gate]
             [banking.registry :as registry]
             [banking.store :as store]))
 
-(def confidence-floor 0.6)
+(def confidence-floor
+  "Documented threshold. The DECIDING copy is
+  `banking.kernels.gate/confidence-floor-x100` (integer x100 in the
+  safety kernel); this def is kept for callers/docs and pinned equal
+  by `banking.kernels.gate-test`."
+  0.6)
 
 (def high-stakes
   "Stakes grave enough to always require a human, even when clean.
@@ -121,6 +127,12 @@
   matching this fleet's majority actuation shape (3600/6190 remain the
   only negative-actuation exceptions)."
   #{:actuation/post-settlement :actuation/dispatch-interbank-message})
+
+(defn- confidence->x100
+  "Host bridge (façade-side, not kernel vocabulary): scale a 0.0..1.0
+  advisor confidence to the kernel's integer x100 wire code."
+  [c]
+  (Math/round (* 100.0 (double c))))
 
 ;; ----------------------------- checks -----------------------------
 
@@ -208,22 +220,35 @@
   Returns {:ok? bool :violations [..] :confidence c :escalate? bool
   :high-stakes? bool :hard? bool}."
   [request _context proposal st]
-  (let [hard (into []
-                   (concat (spec-basis-violations request proposal)
-                           (evidence-incomplete-violations request st)
-                           (iban-checksum-invalid-violations request st)
-                           (sanctions-violations request proposal st)
-                           (already-settled-violations request st)
-                           (already-dispatched-violations request st)))
+  (let [spec-v (spec-basis-violations request proposal)
+        evid-v (evidence-incomplete-violations request st)
+        iban-v (iban-checksum-invalid-violations request st)
+        sanc-v (sanctions-violations request proposal st)
+        setl-v (already-settled-violations request st)
+        disp-v (already-dispatched-violations request st)
+        hard (into [] (concat spec-v evid-v iban-v sanc-v setl-v disp-v))
         conf (:confidence proposal 0.0)
-        low? (< conf confidence-floor)
         stakes? (boolean (high-stakes (:stake proposal)))
-        hard? (boolean (seq hard))]
-    {:ok?          (and (not hard?) (not low?) (not stakes?))
+        ;; The decision itself is delegated to the safety kernel
+        ;; (banking.kernels.gate, integer-coded fail-closed core); this
+        ;; façade only gathers evidence (violation lists with
+        ;; human-readable details) and maps codes back to keywords.
+        ;; Kernel is stricter than the old inline logic on ONE case by
+        ;; design: an out-of-range confidence (< 0 or > 1.0) now
+        ;; escalates instead of counting as high confidence.
+        code (gate/verdict-code (if (seq spec-v) 1 0)
+                                (if (seq evid-v) 1 0)
+                                (if (seq iban-v) 1 0)
+                                (if (seq sanc-v) 1 0)
+                                (if (seq setl-v) 1 0)
+                                (if (seq disp-v) 1 0)
+                                (confidence->x100 conf)
+                                (if stakes? 1 0))]
+    {:ok?          (= 0 code)
      :violations   hard
      :confidence   conf
-     :hard?        hard?
-     :escalate?    (and (not hard?) (or low? stakes?))
+     :hard?        (= 2 code)
+     :escalate?    (= 1 code)
      :high-stakes? stakes?}))
 
 (defn hold-fact

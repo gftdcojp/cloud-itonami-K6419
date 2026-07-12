@@ -27,7 +27,16 @@
   posture every sibling's screening op has. Phase 3's `:auto` set here
   has only ONE member (`:account/intake`) -- this domain has no
   separate no-capital-risk 'file' lifecycle distinct from the account
-  record itself.")
+  record itself.
+
+  The decision core is delegated to the safety kernel
+  `banking.kernels.gate` (integer-coded, fail-closed, safe-kotoba
+  subset); this namespace keeps the human-readable phase table (the
+  documentation and structural-invariant tests read it) and does the
+  keyword<->wire-code mapping at the boundary. The kernel's own
+  battery and the parity matrix in `banking.kernels.gate-test` pin the
+  two representations together."
+  (:require [banking.kernels.gate :as kernel]))
 
 (def read-ops  #{})
 (def write-ops #{:account/intake :compliance/verify :sanctions/screen
@@ -48,6 +57,33 @@
 
 (def default-phase 3)
 
+;; ---- kernel wire-code bridges (façade-side, not kernel vocabulary) ----
+
+(defn- op->code
+  "Kernel op wire code. `read-ops` is EMPTY in this domain, so nothing
+  maps to the reserved read code 0 (if `read-ops` ever gains a member,
+  the kernel needs a read pass-through branch too — today code 0 has
+  no rights in-kernel, fail-closed). Unknown ops map to 6 (unknown
+  write) — the kernel never write-enables it, so an unrecognized op
+  fails closed to HOLD exactly as the old set-membership logic did."
+  [op]
+  (cond
+    (= op :account/intake)                        1
+    (= op :compliance/verify)                     2
+    (= op :sanctions/screen)                      3
+    (= op :actuation/post-settlement)             4
+    (= op :actuation/dispatch-interbank-message)  5
+    :else                                         6))
+
+(defn- disposition->code [d]
+  (cond (= d :commit) 0 (= d :escalate) 1 (= d :hold) 2 :else 2))
+
+(defn- code->disposition [c]
+  (if (= c 0) :commit (if (= c 1) :escalate :hold)))
+
+(defn- code->reason [c]
+  (if (= c 1) :phase-disabled (if (= c 2) :phase-approval nil)))
+
 (defn gate
   "Adjust a governor disposition for the rollout phase. Returns
   {:disposition kw :reason kw|nil}.
@@ -61,14 +97,13 @@
     escalate once the governor clears them (or hold if the governor
     doesn't)."
   [phase {:keys [op]} governor-disposition]
-  (let [{:keys [writes auto]} (get phases phase (get phases default-phase))]
-    (cond
-      (= :hold governor-disposition)       {:disposition :hold :reason nil}
-      (contains? read-ops op)              {:disposition governor-disposition :reason nil}
-      (not (contains? writes op))          {:disposition :hold :reason :phase-disabled}
-      (and (= :commit governor-disposition)
-           (not (contains? auto op)))      {:disposition :escalate :reason :phase-approval}
-      :else                                {:disposition governor-disposition :reason nil})))
+  (let [p (if (contains? phases phase) phase default-phase)
+        op-code (op->code op)
+        gov-code (disposition->code governor-disposition)
+        d (kernel/phase-disposition p op-code gov-code)
+        r (kernel/phase-reason p op-code gov-code)]
+    {:disposition (code->disposition d)
+     :reason (code->reason r)}))
 
 (defn verdict->disposition
   "Map a Monetary Intermediation Governor verdict to a base disposition
