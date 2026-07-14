@@ -221,6 +221,7 @@ core-banking/clearing-network integration would swap in
 | `src/banking/corporate_intel.cljc` | optional cross-reference into [`cloud-itonami-isic-8291`](https://github.com/cloud-itonami/cloud-itonami-isic-8291)'s `:disclosure/screen-name` -- catches an account holder clean on every LOCAL field but flagged in 8291's own sourced PEP/sanctions data; wired into `screen-sanctions` via an injected fn, default is a no-op so every prior caller's behavior is unchanged unless explicitly opted in. Since this actor's own vocabulary has no `:incomplete` middle ground, any non-clean 8291 signal (a hit, 8291's own pending human review, or 8291's screen being held) collapses onto the same `:unresolved` verdict a local flag would produce -- HARD-holding immediately, more conservative than the analogous `cloud-itonami-isic-6910` integration |
 | `src/banking/sim.cljc` | demo driver |
 | `test/banking/*_test.clj` | governor contract · phase invariants · store parity · registry conformance · facts coverage · corporate-intelligence integration |
+| `wasm/iban_checksum.kotoba` | PoC: a WASM-compiled (`kotoba-lang/kotoba` -> `kotoba-lang/kototama`'s `actor:host` ABI) port of `registry.cljc`'s `iban-checksum-invalid?` ISO 7064 MOD 97-10 recompute, via a genuinely recursive fold (not a fixed unroll) -- see `wasm/README.md` for scope, the input/output ABI, and what's out of scope (the letter/rearrangement text preprocessing, Store, the account lookup) |
 
 ## Business-process coverage (honest)
 

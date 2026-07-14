@@ -1,0 +1,44 @@
+(ns cloud-itonami-iban-checksum)
+
+(defn mod97-fold [remainder idx digit-count]
+  (if (= idx digit-count)
+      remainder
+      (mod97-fold (mod (+ (* remainder 10) (mem-byte-at 4 idx)) 97)
+                  (+ idx 1)
+                  digit-count)))
+
+;; ABI: `main` stays 0-arity (the compiler rejects a parameterized main --
+;; :main-arity, see kotoba-lang/kotoba's compile-wasm-expr) and reads its
+;; real inputs out of the exported linear memory instead, at fixed byte
+;; offsets a host writes into before calling main() (same convention as
+;; cloud-itonami-isic-6492's affordability.kotoba /
+;; cloud-itonami-isic-6512's claim_coverage.kotoba /
+;; cloud-itonami-isic-6630's fee_accrual.kotoba):
+;;   offset 0:       digit-count  (i32, count of meaningful digit bytes,
+;;                                 <= 66 for a real 34-char IBAN whose
+;;                                 alphanumeric BBAN is all letters --
+;;                                 2 country letters (doubled) + 2 check
+;;                                 digits (undoubled) + up to 30 BBAN
+;;                                 chars (letters doubled) -- see
+;;                                 wasm/README.md)
+;;   offset 4..(4+digit-count-1): one decimal digit VALUE (0-9, not ASCII)
+;;                                 per byte -- the ISO 7064 MOD 97-10
+;;                                 rearranged + letter-expanded numeric
+;;                                 form of the IBAN, computed by the HOST
+;;                                 (this guest never sees IBAN letters,
+;;                                 only the digit sequence -- see
+;;                                 wasm/README.md "Why the source differs")
+;;
+;; `mod97-fold` is a genuinely RECURSIVE function (calls itself, not
+;; `call-indirect`) implementing the standard streaming mod-97 technique:
+;; remainder = (remainder * 10 + next-digit) mod 97, folded left-to-right
+;; over the digit sequence. `.kotoba` has no `loop`/`recur` special form,
+;; but a plain named self-call DOES compile (confirmed empirically in this
+;; pass -- every prior sibling wasm port avoided recursion; see
+;; wasm/README.md for the probe that established this).
+;;
+;; Returns 1 (the digit sequence's mod-97 fold is congruent to 1 -- IBAN
+;; checksum VALID) or 0 (any other remainder -- IBAN checksum INVALID,
+;; `banking.governor`'s `:iban-checksum-invalid` HARD violation).
+(defn main []
+  (= 1 (mod97-fold 0 0 (mem-i32-at 0 0))))
