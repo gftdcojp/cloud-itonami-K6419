@@ -2,6 +2,10 @@
 
 Shortest path from clone to a verified local dry-run for **ISIC 6419** (`cloud-itonami-isic-6419`).
 
+## Who this is for
+
+Licensed deposit-taking institutions, credit unions, and community banking operators who want to fork, deploy, and run their own governed settlement and interbank-message workflows, without surrendering ledger control to external SaaS.
+
 ## Prerequisites
 
 - Clojure 1.12+ (`clojure --version`)
@@ -33,11 +37,11 @@ open docs/index.html   # or: python3 -m http.server -d docs 8080
 
 Publish: enable GitHub Pages on `main` `/docs`, or any static host.
 
-## 4. Where the Governor sits
+## 4. The Governor: holds unsafe commits
 
-- Blueprint governor key: `monetary-intermediation-governor`
-- Likely source path: `banking.governor.cljc`
-- Pattern: advise → govern → phase-gate → commit | escalate | hold (itonami actor / ADR-2607011000)
+- **Blueprint key:** `monetary-intermediation-governor`
+- **Source:** `src/banking/governor.cljc` — implements spec-basis, evidence-completeness, IBAN checksum (ISO 7064 MOD 97-10), and sanctions-resolution checks
+- **Pattern:** advisor proposes → governor validates against ground truth → phase gates human approval for actuation (settle/dispatch) → immutable audit ledger
 
 ## 5. Claim / go-live
 
