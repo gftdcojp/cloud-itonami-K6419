@@ -7,6 +7,11 @@
  ;; with git coordinates.
  :deps {io.github.com-junkawasaki/langgraph-clj
         {:local/root "../../kotoba-lang/langgraph"}
+        ;; langchain-store: the shared langchain.db store seam (EDN-blob
+        ;; codec + identity schema + event-log helpers) that ~190 actors
+        ;; hand-roll; banking.store is an adopter (ADR-2607141600).
+        io.github.kotoba-lang/langchain-store
+        {:local/root "../../kotoba-lang/langchain-store"}
         ;; optional: banking.corporate-intel's cross-reference into
         ;; cloud-itonami-isic-8291. Only banking.corporate-intel itself
         ;; requires `dossier.*` -- bankingadvisor/operation/governor have

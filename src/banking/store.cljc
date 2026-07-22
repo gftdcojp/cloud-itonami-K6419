@@ -32,10 +32,9 @@
   immutable log -- the audit trail a depositor trusting a banking
   operator needs, and the evidence an operator needs if a settlement
   or dispatch decision is later disputed."
-  (:require #?(:clj  [clojure.edn :as edn]
-               :cljs [cljs.reader :as edn])
-            [banking.registry :as registry]
-            [langchain.db :as d]))
+  (:require [banking.registry :as registry]
+            [langchain.db :as d]
+            [langchain-store.core :as ls]))
 
 (defprotocol Store
   (account [s id])
@@ -190,18 +189,14 @@
   Compound values (compliance/sanctions-screen payloads, ledger facts,
   settlement/interbank-message records) are stored as EDN strings so
   `langchain.db` doesn't expand them into sub-entities -- the same
-  convention every sibling actor's store uses."
-  {:account/id                          {:db/unique :db.unique/identity}
-   :compliance/account-id               {:db/unique :db.unique/identity}
-   :sanctions-screen/account-id         {:db/unique :db.unique/identity}
-   :ledger/seq                         {:db/unique :db.unique/identity}
-   :settlement/seq                     {:db/unique :db.unique/identity}
-   :interbank-message/seq              {:db/unique :db.unique/identity}
-   :settlement-sequence/jurisdiction   {:db/unique :db.unique/identity}
-   :message-sequence/jurisdiction      {:db/unique :db.unique/identity}})
-
-(defn- enc [v] (pr-str v))
-(defn- dec* [s] (when s (edn/read-string s)))
+  convention every sibling actor's store uses. The identity-schema
+  builder, EDN-blob codec and seq-keyed event-log read/append are the
+  shared kotoba-lang/langchain-store machinery (ADR-2607141600) -- the
+  seam ~190 actors hand-roll; this store keeps only its domain wiring."
+  (ls/identity-schema
+   [:account/id :compliance/account-id :sanctions-screen/account-id
+    :ledger/seq :settlement/seq :interbank-message/seq
+    :settlement-sequence/jurisdiction :message-sequence/jurisdiction]))
 
 (defn- account->tx [{:keys [id holder-name iban
                           sanctions-flag-unresolved?
@@ -242,25 +237,16 @@
          (map #(pull->account (d/pull (d/db conn) account-pull [:account/id %])))
          (sort-by :id)))
   (sanctions-screen-of [_ id]
-    (dec* (d/q '[:find ?p . :in $ ?aid
+    (ls/dec* (d/q '[:find ?p . :in $ ?aid
                 :where [?k :sanctions-screen/account-id ?aid] [?k :sanctions-screen/payload ?p]]
               (d/db conn) id)))
   (compliance-of [_ account-id]
-    (dec* (d/q '[:find ?p . :in $ ?aid
+    (ls/dec* (d/q '[:find ?p . :in $ ?aid
                 :where [?a :compliance/account-id ?aid] [?a :compliance/payload ?p]]
               (d/db conn) account-id)))
-  (ledger [_]
-    (->> (d/q '[:find ?s ?f :where [?e :ledger/seq ?s] [?e :ledger/fact ?f]] (d/db conn))
-         (sort-by first)
-         (mapv (comp dec* second))))
-  (settlement-history [_]
-    (->> (d/q '[:find ?s ?r :where [?e :settlement/seq ?s] [?e :settlement/record ?r]] (d/db conn))
-         (sort-by first)
-         (mapv (comp dec* second))))
-  (interbank-message-history [_]
-    (->> (d/q '[:find ?s ?r :where [?e :interbank-message/seq ?s] [?e :interbank-message/record ?r]] (d/db conn))
-         (sort-by first)
-         (mapv (comp dec* second))))
+  (ledger [_] (ls/read-stream conn :ledger/seq :ledger/fact))
+  (settlement-history [_] (ls/read-stream conn :settlement/seq :settlement/record))
+  (interbank-message-history [_] (ls/read-stream conn :interbank-message/seq :interbank-message/record))
   (next-settlement-sequence [_ jurisdiction]
     (or (d/q '[:find ?n . :in $ ?j
               :where [?e :settlement-sequence/jurisdiction ?j] [?e :settlement-sequence/next ?n]]
@@ -281,10 +267,10 @@
       (d/transact! conn [(account->tx value)])
 
       :compliance/set
-      (d/transact! conn [{:compliance/account-id (first path) :compliance/payload (enc payload)}])
+      (d/transact! conn [{:compliance/account-id (first path) :compliance/payload (ls/enc payload)}])
 
       :sanctions-screen/set
-      (d/transact! conn [{:sanctions-screen/account-id (first path) :sanctions-screen/payload (enc payload)}])
+      (d/transact! conn [{:sanctions-screen/account-id (first path) :sanctions-screen/payload (ls/enc payload)}])
 
       :account/mark-settled
       (let [account-id (first path)
@@ -294,7 +280,7 @@
         (d/transact! conn
                      [(account->tx (assoc account-patch :id account-id))
                       {:settlement-sequence/jurisdiction jurisdiction :settlement-sequence/next next-n}
-                      {:settlement/seq (count (settlement-history s)) :settlement/record (enc (get result "record"))}])
+                      {:settlement/seq (count (settlement-history s)) :settlement/record (ls/enc (get result "record"))}])
         result)
 
       :account/mark-dispatched
@@ -305,12 +291,12 @@
         (d/transact! conn
                      [(account->tx (assoc account-patch :id account-id))
                       {:message-sequence/jurisdiction jurisdiction :message-sequence/next next-n}
-                      {:interbank-message/seq (count (interbank-message-history s)) :interbank-message/record (enc (get result "record"))}])
+                      {:interbank-message/seq (count (interbank-message-history s)) :interbank-message/record (ls/enc (get result "record"))}])
         result)
       nil)
     s)
   (append-ledger! [s fact]
-    (d/transact! conn [{:ledger/seq (count (ledger s)) :ledger/fact (enc fact)}])
+    (ls/append-blob! conn :ledger/seq :ledger/fact (count (ledger s)) fact)
     fact)
   (with-accounts [s accounts]
     (when (seq accounts) (d/transact! conn (mapv account->tx (vals accounts)))) s))
